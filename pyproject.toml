@@ -34,4 +34,6 @@ select = ["E", "W", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# -p no:cacheprovider: the repo lives on a OneDrive-synced path that
+# intermittently locks .pytest_cache; we don't rely on the cache.
+addopts = "-q -p no:cacheprovider"
