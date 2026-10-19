@@ -1,0 +1,34 @@
+# Backing services for local development.
+# The LivePay app/worker run on the host for now (Phase 0); only Postgres
+# and Redis are containerized. A healthcheck is defined on each so later
+# phases can gate startup on "service_healthy".
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: livepay
+      POSTGRES_PASSWORD: livepay
+      POSTGRES_DB: livepay
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U livepay -d livepay"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
