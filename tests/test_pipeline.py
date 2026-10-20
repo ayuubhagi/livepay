@@ -44,9 +44,9 @@ def test_punch_flows_to_snapshot_and_audit(committed_db, session_factory, redis_
     with session_factory() as db:
         punches = db.execute(select(func.count()).select_from(Punch)).scalar()
         assert punches == 2
-        latest = db.execute(
-            select(PayCalculation).order_by(PayCalculation.id.desc())
-        ).scalars().first()
+        latest = (
+            db.execute(select(PayCalculation).order_by(PayCalculation.id.desc())).scalars().first()
+        )
         assert latest.regular_hours == Decimal("8.00")
         assert latest.gross_pay == Decimal("240.00")  # 8h * $30
         assert latest.net_pay is None  # deductions not computed yet (Phase 3)

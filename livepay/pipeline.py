@@ -56,9 +56,7 @@ def _tz() -> ZoneInfo:
 
 def _get_or_create_period(db: Session, employee_id: int, start, end) -> PayPeriod:
     period = db.execute(
-        select(PayPeriod).where(
-            PayPeriod.employee_id == employee_id, PayPeriod.start_date == start
-        )
+        select(PayPeriod).where(PayPeriod.employee_id == employee_id, PayPeriod.start_date == start)
     ).scalar_one_or_none()
     if period is None:
         period = PayPeriod(employee_id=employee_id, start_date=start, end_date=end)
