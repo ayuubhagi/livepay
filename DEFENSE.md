@@ -228,3 +228,108 @@ To unblock: drop the T4127 PDF in `docs/`, transcribe the constants with
 citations, run the 22 PDOC cases, and paste results into the CSV. Then Phase 3
 implements the formulas and Phase 4 parametrizes the CSV to check every
 deduction to the cent.
+
+---
+
+## Phase 5 — Event pipeline
+
+### What we built
+
+`POST /punches` validates and XADDs to a Redis Stream; a worker consumes the
+stream via a consumer group, persists the punch idempotently, recalculates the
+pay period, writes a `PayCalculation` snapshot and an `AuditLog` entry, then
+XACKs. Integration tests cover the happy path, duplicate suppression, and the
+HTTP endpoint.
+
+### Decisions and why
+
+- **Stream + consumer group, not a plain pub/sub or list.** Streams give at-
+  least-once delivery with explicit ACKs, so a crash mid-processing re-delivers
+  the message instead of losing it. The consumer group lets us scale to more
+  workers later.
+- **202 Accepted at ingestion.** The endpoint only enqueues; the worker does the
+  write. This decouples request latency from recalculation and means a burst of
+  punches can't overwhelm the DB synchronously.
+- **Idempotency in two layers.** The client key is `UNIQUE` and the insert is
+  `ON CONFLICT DO NOTHING`; a replayed message inserts nothing and is logged as
+  `punch_duplicate_ignored`. At-least-once delivery therefore can't double-count.
+- **Append a new snapshot per recalculation.** Keeps an auditable history of how
+  pay evolved across the period rather than mutating one row.
+- **Core logic (`process_punch`, `consume_once`) takes its Redis client and
+  session factory as arguments.** Pure-ish and testable: tests drive one batch
+  on an isolated Redis db (15) without running the infinite worker loop.
+
+### Tradeoffs / simplified
+
+- At-least-once (not exactly-once) delivery; idempotency makes reprocessing safe
+  instead of trying to prevent it. No dead-letter handling or pending-entry
+  reclaim yet (a real system would reclaim via `XAUTOCLAIM`).
+- One recalculation reads all punches in the period each time — simple and
+  correct; could be optimized if periods got huge.
+
+### Likely interview questions
+
+- **Why a stream instead of calling the calc inline in the request?** Decoupling
+  + durability + back-pressure; the request returns fast and work survives a
+  restart.
+- **What guarantees does a consumer group give, and how do you avoid double
+  counting?** At-least-once delivery; the unique idempotency key + ON CONFLICT
+  make reprocessing a no-op.
+- **What happens if the worker dies after processing but before XACK?** The
+  message is redelivered; the idempotent insert makes the retry harmless.
+
+---
+
+## Phase 6 — Wallet
+
+### What we built
+
+`available = earned_net * (1 - safety_buffer) - already_withdrawn`, a read-only
+`GET /wallet/{id}`, and `POST /withdrawals` that never overdraws — proven by a
+two-thread concurrency test.
+
+### Decisions and why
+
+- **Overdraw safety via `SELECT ... FOR UPDATE` on the pay-period row.** Two
+  simultaneous withdrawals serialize on the row lock; the second only reads the
+  balance after the first commits, so their sum can't exceed the available
+  amount. The test launches two threads through a barrier and asserts exactly
+  one succeeds and the total never exceeds the limit.
+- **Safety buffer is a product policy, not a tax rule.** Withholding a margin
+  protects against a later recalculation (e.g. a corrected punch) dropping net
+  pay below what was already withdrawn.
+- **Round the available balance DOWN.** Never offer a sub-cent more than truly
+  available.
+- **`earned_net` comes from the latest snapshot's `net_pay`.** It's null until
+  Phase 3, treated as 0 — you can't withdraw against pay we haven't verified yet.
+  The wallet test seeds a net value directly to exercise the locking in
+  isolation from the tax engine.
+- **Withdrawal idempotency key** returns the existing row on replay.
+
+### Likely interview questions
+
+- **How do you stop two concurrent withdrawals from overdrawing?** A row lock
+  (`FOR UPDATE`) serializes them in one transaction each; optimistic checks
+  without a lock have a check-then-act race. (Alternatives: `SERIALIZABLE`
+  isolation with retry, or a conditional `UPDATE ... WHERE balance >= amount`.)
+- **Why round down?** Paying out a rounded-up fraction would let the balance go
+  slightly negative over many withdrawals.
+- **Why is available 0 right now?** Net pay needs the deductions engine; until
+  then we don't withdraw against unverified pay.
+
+---
+
+## Phase 7 — Property-based tests
+
+Hypothesis proves, over many generated punch sequences, that the gross engine is
+**deterministic**, **order-independent** (arrival order never changes the
+result), produces **non-negative** hours/gross, and **conserves hours**
+(regular + overtime = total worked). Writing these surfaced two real bugs,
+now fixed: pairing wasn't deterministic when two punches shared a timestamp
+(added an IN-before-OUT tiebreak), and `timedelta.total_seconds()` leaked float
+imprecision into hours (switched to integer microseconds). Net-pay properties
+(net ≥ 0, net ≤ gross) are added once deductions land.
+
+**Interview point:** example-based tests check cases you thought of; property
+tests check invariants across inputs you didn't — which is how the timestamp-tie
+and float bugs showed up.
