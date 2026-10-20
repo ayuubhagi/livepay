@@ -8,7 +8,7 @@ end (via a SAVEPOINT), so tests are isolated and order-independent.
 import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from livepay import models  # noqa: F401  (register tables on Base.metadata)
 from livepay.config import settings
@@ -70,3 +70,46 @@ def db_session(engine):
         session.close()
         transaction.rollback()
         connection.close()
+
+
+# --- Fixtures for tests that commit (pipeline / wallet) ---------------------
+# These can't use the rollback fixture because the worker and wallet commit
+# real transactions (and open multiple connections). Instead we wipe all tables
+# after the test.
+
+
+@pytest.fixture
+def session_factory(engine):
+    return sessionmaker(bind=engine, expire_on_commit=False, future=True)
+
+
+def _truncate_all(session_factory) -> None:
+    with session_factory() as cleanup:
+        for table in reversed(Base.metadata.sorted_tables):
+            cleanup.execute(table.delete())
+        cleanup.commit()
+
+
+@pytest.fixture
+def committed_db(session_factory):
+    """A real (committing) session; all data is wiped afterwards."""
+    db = session_factory()
+    try:
+        yield db
+    finally:
+        db.close()
+        _truncate_all(session_factory)
+
+
+@pytest.fixture
+def redis_client():
+    """A Redis client on db 15 (isolated from dev data), flushed around each test."""
+    import redis
+
+    # Use db 15 to isolate test data from the dev stream (db 0).
+    test_url = settings.redis_url.rsplit("/", 1)[0] + "/15"
+    client = redis.Redis.from_url(test_url, decode_responses=True)
+    client.flushdb()
+    yield client
+    client.flushdb()
+    client.close()
