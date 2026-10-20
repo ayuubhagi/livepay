@@ -4,6 +4,7 @@ Values default to the docker-compose services for local dev. Override via a
 `.env` file or real environment variables in other environments.
 """
 
+from datetime import date
 from decimal import Decimal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,6 +15,13 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://livepay:livepay@localhost:5433/livepay"
     redis_url: str = "redis://localhost:6379/0"
+
+    # Employee time zone for day/work-week boundaries (Ontario).
+    timezone: str = "America/Toronto"
+
+    # Biweekly pay periods are counted in 14-day blocks from this anchor date,
+    # which must be a work-week start (Sunday) so periods align to work weeks.
+    pay_period_anchor: date = date(2025, 12, 28)  # a Sunday
 
     # Wallet: fraction of earned net pay held back as a safety buffer.
     # This is a PRODUCT policy choice (not a CRA/tax rule): withholding a
