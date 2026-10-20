@@ -45,6 +45,7 @@ OVERTIME_MULTIPLIER = Decimal("1.5")
 WEEK_START_WEEKDAY = 6  # Sunday
 
 _HOUR = Decimal(3600)
+_MICROS_PER_HOUR = Decimal(3_600_000_000)
 _CENTS = Decimal("0.01")
 _HUNDREDTH_HOUR = Decimal("0.01")
 
@@ -64,7 +65,10 @@ def _elapsed_hours(start: datetime, end: datetime) -> Decimal:
     across a DST change. In UTC the subtraction reflects real elapsed time.
     """
     delta = end.astimezone(UTC) - start.astimezone(UTC)
-    return Decimal(delta.total_seconds()) / _HOUR
+    # Use integer microseconds, not float total_seconds(), so no float
+    # imprecision leaks into hours (and therefore into money).
+    micros = (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+    return Decimal(micros) / _MICROS_PER_HOUR
 
 
 @dataclass(frozen=True)
@@ -103,7 +107,9 @@ def pair_punches(punches: list[PunchLike]) -> tuple[list[Shift], list[Anomaly]]:
     * a clock-out with no open clock-in -> `clock_out_without_clock_in` anomaly;
     * a clock-out at or before its clock-in -> `non_positive_shift` anomaly.
     """
-    ordered = sorted(punches, key=lambda p: p.event_time)
+    # Sort by time, then IN before OUT, so punches at the exact same instant
+    # pair deterministically regardless of the order they arrived in.
+    ordered = sorted(punches, key=lambda p: (p.event_time, p.kind.value))
     shifts: list[Shift] = []
     anomalies: list[Anomaly] = []
     open_in: PunchLike | None = None
