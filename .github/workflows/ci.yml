@@ -24,6 +24,16 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
     env:
       # CI's Postgres service is on 5432 (no local conflict like the dev box).
       DATABASE_URL: postgresql+psycopg://livepay:livepay@localhost:5432/livepay
