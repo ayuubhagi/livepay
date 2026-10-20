@@ -12,7 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+psycopg://livepay:livepay@localhost:5432/livepay"
+    database_url: str = "postgresql+psycopg://livepay:livepay@localhost:5433/livepay"
     redis_url: str = "redis://localhost:6379/0"
 
     # Wallet: fraction of earned net pay held back as a safety buffer.

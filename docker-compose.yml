@@ -11,7 +11,9 @@ services:
       POSTGRES_PASSWORD: livepay
       POSTGRES_DB: livepay
     ports:
-      - "5432:5432"
+      # Host 5433 -> container 5432 to avoid colliding with a native
+      # Postgres that may already own 5432 on the host.
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
