@@ -17,10 +17,10 @@ pay they could withdraw right now.
 🚧 Under construction. Built in phases; see `DEFENSE.md` for the design log.
 
 - [x] Phase 0 — Scaffold (FastAPI, Postgres + Redis via Docker, pytest, ruff, CI)
-- [ ] Phase 1 — Domain models + migrations
-- [ ] Phase 2 — Gross pay (overtime, midnight-crossing, missing clock-outs)
-- [ ] Phase 3 — Deductions (CPP/CPP2, EI, federal + Ontario tax)
-- [ ] Phase 4 — PDOC verification tests
+- [x] Phase 1 — Domain models + migrations
+- [x] Phase 2 — Gross pay (overtime, midnight-crossing, missing clock-outs)
+- [ ] Phase 3 — Deductions (CPP/CPP2, EI, federal + Ontario tax) — *blocked on T4127 PDF*
+- [ ] Phase 4 — PDOC verification tests — *fixtures ready; awaiting PDOC run*
 - [ ] Phase 5 — Event pipeline (Redis Streams, worker, idempotency)
 - [ ] Phase 6 — Wallet (available balance, withdrawals, locking)
 - [ ] Phase 7 — Property-based tests (Hypothesis)

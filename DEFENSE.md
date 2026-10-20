@@ -207,3 +207,24 @@ no averaging agreements, no shift premiums. Single rate per employee.
   subtraction bug and pay the true hours worked across DST.
 - **Where could float have crept in and why didn't it?** Durations come from
   `timedelta`; everything downstream is `Decimal`, rounded only at the end.
+
+---
+
+## Phase 3/4 — Deductions + PDOC verification (prep done, blocked)
+
+**Blocked on the CRA T4127 (2026) PDF.** Per the project's hard rule we never
+invent tax rates or thresholds. What's in place so far:
+
+- `livepay/tax/constants_2026.py` lists every constant we need, grouped by
+  T4127 section, each set to a `PENDING` sentinel that *raises on use* so the
+  deduction code cannot run with a missing value.
+- `tests/fixtures/pdoc_cases.csv` holds 22 varied input cases (income levels,
+  claim codes, overtime, and YTD values that exercise the CPP/CPP2/EI caps).
+  Expected columns are intentionally blank — they're filled from CRA's PDOC, an
+  independent oracle, so the test is a genuine cross-check (see
+  `docs/pdoc_instructions.md`).
+
+To unblock: drop the T4127 PDF in `docs/`, transcribe the constants with
+citations, run the 22 PDOC cases, and paste results into the CSV. Then Phase 3
+implements the formulas and Phase 4 parametrizes the CSV to check every
+deduction to the cent.
