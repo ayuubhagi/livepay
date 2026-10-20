@@ -142,3 +142,68 @@ creates the schema, and DB-backed tests with a Postgres service in CI.
   (SAVEPOINT pattern) against a throwaway `livepay_test` database.
 - **Why store UTC timestamps?** Unambiguous instants for midnight-crossing and
   DST; localize only when presenting or applying provincial rules.
+
+---
+
+## Phase 2 — Gross pay
+
+### What we built
+
+A pure-function engine (`livepay/payroll/gross.py`) that turns a list of punches
++ an hourly rate into regular hours, overtime hours, and gross dollars, plus a
+list of anomalies. Ten unit tests cover every edge case.
+
+### Decisions and why
+
+- **Pipeline: punches → shifts → hours per local day → hours per work week →
+  regular/overtime → dollars.** Splitting each shift across local calendar days
+  is the key trick: it handles both midnight crossing and shifts that straddle
+  the Sat/Sun work-week boundary with the same code.
+- **Elapsed time is computed in UTC, boundaries in local time.** Hours paid =
+  real elapsed time (correct across DST); day/week membership = local calendar
+  (what "a work week" means). A 1:00–4:00 shift on spring-forward day is 2 paid
+  hours, not 3.
+- **The same-tzinfo subtraction trap.** Subtracting two aware datetimes that
+  share one `tzinfo` object makes Python do naive wall-clock subtraction and
+  ignore DST. We convert to UTC first (`_elapsed_hours`). A test (`test_dst_
+  spring_forward...`) pins this.
+- **Overtime is weekly (per Sun–Sat work week), not per pay period.** Ontario
+  ESA s. 22: over 44 h in a *work week* at 1.5×. A test proves a 40h + 48h
+  biweekly period yields 4h OT, which a per-period calc would miss.
+- **Resilient punch pairing, never raises.** Missing clock-out → `open_shift`
+  (zero hours); two clock-ins in a row → drop the first; clock-out with no
+  clock-in → flagged and skipped. Bad data produces anomalies, not crashes.
+- **Rounding.** Hours recorded to 0.01h, gross to the cent (`ROUND_HALF_UP`),
+  computing gross from the recorded hours so stored values stay consistent.
+  No earlier rounding — matches the "round only where required" rule.
+
+### Tradeoffs / alternatives considered
+
+- **Dropping the first of two consecutive clock-ins** vs. guessing an end time.
+  We can't know when someone left, so inventing hours would be wrong; dropping
+  + flagging is the safe, auditable choice.
+- **Work week fixed to Sunday–Saturday.** ESA lets the employer define it; we
+  use the statutory default. A real system would store it per employer.
+- **Hours attributed by splitting at local midnight** vs. attributing a whole
+  shift to its start day. Splitting is more correct for week-boundary OT and
+  costs little.
+
+### Simplified vs. real payroll
+
+Hourly only (no salaried); no stat-holiday pay, no daily OT (Ontario has none),
+no averaging agreements, no shift premiums. Single rate per employee.
+
+### Likely interview questions
+
+- **How do you handle a shift crossing midnight / a week boundary?** Split the
+  shift into per-local-day segments; each day maps to a work week, so the hours
+  land in the right week(s) automatically.
+- **How is overtime computed and why per week?** Sum each Sun–Sat week; hours
+  over 44 are overtime. ESA defines OT weekly, so a per-pay-period sum would be
+  wrong when one week is light and the other heavy.
+- **What happens on a missing clock-out?** It becomes an `open_shift` anomaly
+  with zero counted hours; the calculation still completes.
+- **Why compute elapsed time in UTC?** To avoid the same-tzinfo wall-clock
+  subtraction bug and pay the true hours worked across DST.
+- **Where could float have crept in and why didn't it?** Durations come from
+  `timedelta`; everything downstream is `Decimal`, rounded only at the end.
