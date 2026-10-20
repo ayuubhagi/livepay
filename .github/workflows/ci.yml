@@ -8,6 +8,26 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: livepay
+          POSTGRES_PASSWORD: livepay
+          POSTGRES_DB: livepay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U livepay -d livepay"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # CI's Postgres service is on 5432 (no local conflict like the dev box).
+      DATABASE_URL: postgresql+psycopg://livepay:livepay@localhost:5432/livepay
+
     steps:
       - uses: actions/checkout@v4
 
