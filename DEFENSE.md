@@ -74,3 +74,71 @@ secrets (`POSTGRES_PASSWORD`) are hardcoded dev values in compose and
   surface or slow installs.
 - **Why is the app not in Docker?** Faster dev loop early on; it gets
   containerized when the worker process makes it worthwhile.
+
+---
+
+## Phase 1 — Domain models + migrations
+
+### What we built
+
+Six SQLAlchemy 2 models (Employee, PayPeriod, Punch, PayCalculation,
+Withdrawal, AuditLog), a config/session layer, an Alembic migration that
+creates the schema, and DB-backed tests with a Postgres service in CI.
+
+### Decisions and why
+
+- **SQLAlchemy 2 typed models** (`Mapped[...]` / `mapped_column`). Static types
+  flow into the ORM, so mypy/IDE catch column misuse.
+- **Money as `Numeric`, never `Float`.** `hourly_rate`/`gross_pay`/etc. are
+  `Numeric(p, 2)`, mapping to Python `Decimal`. Floats can't represent `0.10`
+  exactly, so cents drift — unacceptable for payroll.
+- **Timezone-aware timestamps** (`DateTime(timezone=True)`). Punches cross
+  midnight and we compare instants; naive local times would be ambiguous around
+  DST. Store UTC, interpret in the employee's zone at calculation time.
+- **Deduction columns are nullable.** A `PayCalculation` exists after gross pay
+  is known (Phase 2) but before deductions (Phase 3); null = "not computed yet,"
+  distinct from `0`.
+- **Idempotency key is `UNIQUE` on `punches`.** The database is the final
+  guarantee that the same punch can't be inserted twice, even under a race —
+  not just app-level checks.
+- **CHECK constraints** (`hourly_rate >= 0`, `withdrawal.amount > 0`). Invariants
+  belong in the DB so bad data can't exist regardless of which code writes it.
+- **`punchkind` as a DB enum**; the migration's downgrade explicitly drops the
+  enum type, because Postgres leaves it behind after the table is dropped.
+- **Alembic URL comes from app settings**, not hardcoded in `alembic.ini`, so
+  migrations and the app always share one source of truth.
+- **Tests use a dedicated `livepay_test` DB with SAVEPOINT rollback** per test,
+  so they are isolated and order-independent and never touch dev data.
+
+### Tradeoffs / alternatives considered
+
+- **Integer PKs vs. UUIDs.** Chose auto-increment ints for simplicity/readability.
+  UUIDs would avoid ID enumeration and suit distributed inserts; noted as a
+  future change if the event pipeline ever generates IDs client-side.
+- **`create_all` in tests vs. running migrations in tests.** Used `create_all`
+  for speed; the migration's correctness is proven separately by a full
+  up/down/up cycle. A stricter setup would run `alembic upgrade head` in tests.
+- **YTD amounts: derived vs. stored.** No YTD column yet — year-to-date CPP/EI
+  will be summed from prior `PayCalculation` rows in Phase 3. Simpler and avoids
+  a denormalized field that can drift; revisit if it becomes a performance issue.
+
+### Environment gotchas (worth being able to explain)
+
+- Dev box has a **native Postgres on 5432**, so compose maps the container to
+  **5433** to avoid the clash. CI has no such conflict and uses 5432.
+- The repo lives under **OneDrive**, which locked files in `.venv`; the project
+  venv is kept **outside** OneDrive via `UV_PROJECT_ENVIRONMENT`.
+
+### Likely interview questions
+
+- **Why `Decimal`/`Numeric` for money?** Binary floats can't represent most
+  decimal fractions exactly; errors accumulate. `Numeric` is exact base-10.
+- **Where do you enforce idempotency and why there?** A `UNIQUE` DB constraint —
+  the only place that holds under concurrent inserts; app checks alone have a
+  check-then-insert race.
+- **Why nullable deduction columns?** They model "not yet computed" vs. a real
+  zero; the snapshot is written in two stages (gross, then deductions).
+- **How are tests isolated?** Each runs in a transaction rolled back at the end
+  (SAVEPOINT pattern) against a throwaway `livepay_test` database.
+- **Why store UTC timestamps?** Unambiguous instants for midnight-crossing and
+  DST; localize only when presenting or applying provincial rules.
